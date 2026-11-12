@@ -82,4 +82,8 @@ Only review-status bookkeeping in the design and this log changed after approval
 
 **Integration base:** Fetching the authorized fork's `main` completed with exit 0. Its head is exactly `31b2dc9`, matching the pinned local base, so there are no intervening target changes to integrate or decline.
 
-**Next concrete action:** Commit and push the verified candidate, open the draft PR with inspected public evidence, and run independent Tier A implementation review with the long-review profile. The private room model remains conditional.
+**Publication checkpoint:** The candidate is committed through `4840ddd`. Push job `shaped-wall-support/jobs/push-initial` exited 1: the configured GitHub OAuth credential lacks `workflow` scope for the CI file. A subsequent draft-creation attempt also exited 1 because the rejected branch was absent; a read-back confirmed no PR exists, so no blind attachment retry is appropriate. Existing SSH authentication also failed because its agent could not sign. The CI change is retained. The user has been asked to refresh the credential or explicitly permit local review before draft creation, as required by the review skill's sequencing rule.
+
+**Review preparation:** Controller preflight succeeded for all 18 changed paths, Tier A, fresh `opus-long`/xhigh with a 30-minute timeout. This was preparation only; no independent implementation verdict is claimed. The earlier plan approval remains valid. Local verification remains valid because only this factual status entry changed after the checks.
+
+**Next stopping condition:** After authentication or the explicit sequencing exception, run the independent implementation review, resolve findings and bind approval to the final commit. If publishing is available, leave the reviewed draft PR for the user. Task 3's local implementation is complete, but its review/publication gate is pending. The private room model remains conditional.
