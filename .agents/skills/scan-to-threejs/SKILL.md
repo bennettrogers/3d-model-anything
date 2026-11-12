@@ -28,6 +28,10 @@ Keep new personal captures and generated comparisons ignored by Git. The public 
 
 Establish the floor, wall planes, openings, ceiling steps and object dimensions before adding detail. Use orthographic scan renders and multiple photos to resolve ambiguous shapes. Record uncertainty rather than inventing measurements.
 
+New room conversion preserves each wall's full source `outline` in wall-local `[u, v]` meters, including any raised bottom. It is measurement evidence, not a `WallDef` input. Read the outline contract in [house-capture.md](references/house-capture.md), then author either a rectangular wall or a bounded `topProfile` as described in [modeling.md](references/modeling.md). Record any deliberate floor idealization; do not flatten the captured boundary in place.
+
+For cathedral ceilings, irregular room shapes or skylight nooks, build and compare the architecture shell first: footprint, wall tops, openings, roof planes, nook transition and skylight well. Put explicit roof/well surfaces in `BuiltRoom.ceiling` and set `wallTop` to the actual maximum modeled elevation. Present overall, ridge/eave and nook comparisons for architectural review, then stop before furnishings unless that next pass is already authorized. A shared wall's `topProfile` does not infer or construct a roof.
+
 Read [modeling.md](references/modeling.md) for geometry, materials and wall cutaways; read [advanced-modeling.md](references/advanced-modeling.md) for detailed modeling and performance. Match the user's requested fidelity. For a detailed reconstruction, compare silhouettes, construction, material scale, surface graphics and lighting at the intended viewing distance. RoomPlan boxes are bounds, not finished furniture.
 
 Prepare photos in the converted room's array order with `prepare_photos.py`. Preserve the camera pose and intrinsics; see the format reference for sensor orientation. Use the matched-camera tools:
