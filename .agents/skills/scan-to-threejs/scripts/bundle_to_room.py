@@ -7,7 +7,7 @@ usage: bundle_to_room.py <bundle_dir> [--room N] [-o room.json] [--plan plan.png
 Output JSON:
   transform  worldToRoom (column-major 4x4) + theta/center/floorY it was built from
   polygon    floor outline [[x, z], ...] in room coords (counter-clockwise seen from above)
-  walls      [{index, a, b, height, origin, u, n, length, openings: [{kind, u0, u1, v0, v1}]}]
+  walls      [{index, a, b, height, origin, u, n, length, outline: [[u, v], ...], openings: [...]}]
              origin = interior face, left end, floor; u runs left→right seen from inside;
              n points into the room; u × up = n (the WallDef convention in shell.ts)
   objects    [{category, center, size, rotY, front}]  (rotY turns local +z to `front`)
@@ -35,6 +35,72 @@ def mul(a, b):
 def apply(m, p, w=1.0):
     v = [p[0], p[1], p[2], w]
     return [sum(m[i][k] * v[k] for k in range(4)) for i in range(3)]
+
+
+def project_wall_outline(surface, world_to_room, origin, u):
+    """Preserve the source boundary in the wall's final inward-facing basis.
+
+    v is room-floor elevation, not distance from the source wall's bottom.
+    Empty source polygons describe rectangles, including their vertical offset.
+    """
+    tolerance = 0.001
+
+    def invalid(reason):
+        raise ValueError(f"wall {surface.get('identifier', '<unknown>')}: invalid outline: {reason}")
+
+    width, height = surface['dimensions'][:2]
+    if not all(math.isfinite(v) and v > 0 for v in (width, height)):
+        invalid('dimensions must be finite and positive')
+    source = surface.get('polygonCorners')
+    if not source:
+        source = [[-width / 2, -height / 2, 0], [width / 2, -height / 2, 0],
+                  [width / 2, height / 2, 0], [-width / 2, height / 2, 0]]
+    matrix = mul(world_to_room, mat(surface['transform']))
+    normal = [-u[2], 0, u[0]]
+    points = []
+    for corner in source:
+        if len(corner) != 3 or not all(isinstance(v, (int, float)) and math.isfinite(v) for v in corner):
+            invalid('corners must contain three finite coordinates')
+        p = apply(matrix, corner)
+        delta = [p[k] - origin[k] for k in range(3)]
+        if not all(math.isfinite(v) for v in delta):
+            invalid('transformed corners must be finite')
+        if abs(sum(delta[k] * normal[k] for k in range(3))) > tolerance:
+            invalid('corner lies outside the wall plane (1 mm tolerance)')
+        points.append([round(sum(delta[k] * u[k] for k in range(3)), 4), round(delta[1], 4)])
+    if len(points) > 1 and points[0] == points[-1]:
+        points.pop()
+    if len(points) < 3 or len({tuple(p) for p in points}) != len(points):
+        invalid('at least three distinct corners are required; repeated corners are not supported')
+
+    def cross(a, b, c):
+        return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+    def on_segment(a, b, p):
+        return (abs(cross(a, b, p)) <= 1e-9 and
+                all(min(a[k], b[k]) - 1e-9 <= p[k] <= max(a[k], b[k]) + 1e-9 for k in (0, 1)))
+
+    def intersects(a, b, c, d):
+        return ((cross(a, b, c) * cross(a, b, d) < 0 and cross(c, d, a) * cross(c, d, b) < 0) or
+                on_segment(a, b, c) or on_segment(a, b, d) or on_segment(c, d, a) or on_segment(c, d, b))
+
+    count = len(points)
+    for i, a in enumerate(points):
+        b, previous = points[(i + 1) % count], points[i - 1]
+        if on_segment(previous, a, b) or on_segment(a, b, previous):
+            invalid('adjacent edges overlap')
+        for j in range(i + 2, count):
+            if i == 0 and j == count - 1:
+                continue  # neighboring first/last edges share one endpoint
+            if intersects(a, b, points[j], points[(j + 1) % count]):
+                invalid('boundary self-intersects')
+    area = sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(points, points[1:] + points[:1]))
+    if abs(area) <= tolerance ** 2:
+        invalid('boundary has zero area')
+    if area < 0:
+        points.reverse()
+    first = min(range(count), key=lambda i: points[i])
+    return points[first:] + points[:first]
 
 
 def main():
@@ -147,6 +213,7 @@ def main():
             'u': [round(v, 5) for v in u],
             'n': [round(v, 5) for v in n],
             'length': round(length, 4),
+            'outline': project_wall_outline(w, W2R, origin, u),
             'confidence': next(iter(w['confidence'])),
             'openings': sorted(openings, key=lambda o: o['u0']),
         })
