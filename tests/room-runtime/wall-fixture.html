@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Wall profile fixture</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; background: #18202b; color: #eef2f6; font: 15px system-ui, sans-serif; }
+      header { padding: 24px 32px 0; }
+      h1 { margin: 0; font-size: 23px; }
+      p { color: #b8c5d4; margin: 8px 0 24px; }
+      .labels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; text-align: center; }
+      .labels h2 { margin: 0; font-size: 16px; font-weight: 550; }
+      canvas { display: block; width: 100%; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Wall profile geometry</h1>
+      <p>Fictional test shapes with door notches, window holes, painted slab ends, and trim reveals.</p>
+      <div class="labels"><h2>Rectangle</h2><h2>Gable</h2><h2>Asymmetric top</h2></div>
+    </header>
+    <canvas aria-label="Three fictional wall shapes with door and window openings"></canvas>
+    <script type="module" src="./wall-fixture.ts"></script>
+  </body>
+</html>

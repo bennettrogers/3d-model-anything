@@ -8,7 +8,7 @@ export type Opening =
   | { kind: 'rect'; u0: number; u1: number; v0: number; v1: number; casing?: boolean }
   | { kind: 'arch'; u0: number; u1: number; v0: number; spring: number };
 
-export interface WallDef {
+interface WallBase {
   name: string;
   origin: THREE.Vector3; // interior face, left end, floor
   u: THREE.Vector3; // along the wall, left → right when facing it from the room
@@ -20,16 +20,21 @@ export interface WallDef {
   panels: [number, number, number, number][];
   /** extra [u0, u1] ranges without baseboard (casing openings are added automatically) */
   baseboardGaps?: [number, number][];
-  /** wall height (defaults to 3.24 m) */
-  height?: number;
-  /** crown molding along the top (default true) */
-  crown?: boolean;
-  /** how far the slab runs past each end [start, end] (default 0.3 both; 0 at outside corners) */
-  ext?: [number, number];
   /** paint + trim materials (default: the palette's wall/trim) */
   material?: THREE.Material;
   trimMaterial?: THREE.Material;
 }
+
+/** Authored, floor-referenced top points; captured source outlines are a separate data contract. */
+export type WallTopProfile = readonly (readonly [number, number])[];
+
+export type WallDef = WallBase & (
+  | { topProfile?: undefined; /** Defaults to 3.24 m. */ height?: number;
+      /** Default true. */ crown?: boolean;
+      /** Slab extensions; default 0.3 m at both ends. */ ext?: [number, number] }
+  | { topProfile: WallTopProfile; height?: never; crown: false; ext: [0, 0];
+      panels: []; openings: Extract<Opening, { kind: 'rect' }>[] }
+);
 
 export function wallPoint(w: WallDef, u: number, v: number, out = 0) {
   return w.origin.clone().addScaledVector(w.u, u).add(new THREE.Vector3(0, v, 0)).addScaledVector(w.n, out);
@@ -57,7 +62,63 @@ const BASEBOARD_PROFILE: [number, number][] = [
 const CROWN_PROFILE: [number, number][] = [
   [0, -0.11], [0.01, -0.11], [0.01, -0.1], [0.018, -0.095], ...arc(0.1, -0.095 + 0.0, 0.082, Math.PI, Math.PI / 2, 8).map(([s, t]): [number, number] => [s, t]), [0.105, -0.008], [0.11, 0], [0, 0],
 ];
+
+/** Validate before shape/extrusion construction; normalize only endpoint rounding, on a copy. */
+function topProfile(w: WallDef): [number, number][] | undefined {
+  if (w.topProfile === undefined) return undefined;
+  const fail = (reason: string): never => { throw new Error(`Wall ${w.name}: invalid top profile: ${reason}`); };
+  const eps = 0.001;
+  if (!Number.isFinite(w.length) || w.length <= 0 || !Number.isFinite(w.thickness) || w.thickness <= 0) {
+    fail('length and thickness must be finite and positive');
+  }
+  if (w.height !== undefined) fail('height conflicts with profile-derived elevation');
+  if (w.crown !== false) fail('crown must be explicitly false');
+  if (!Array.isArray(w.ext) || w.ext.length !== 2 || w.ext.some(e => e !== 0)) fail('ext must be [0, 0]');
+  if (!Array.isArray(w.panels) || w.panels.length) fail('panels must be empty');
+  if (!Array.isArray(w.topProfile) || w.topProfile.length < 2) fail('at least two top points are required');
+  const points: [number, number][] = w.topProfile.map(p => {
+    if (!Array.isArray(p) || p.length !== 2 || !p.every(Number.isFinite) || p[1] <= 0) {
+      fail('each point needs finite u and positive v');
+    }
+    return [p[0], p[1]];
+  });
+  if (Math.abs(points[0][0]) > eps || Math.abs(points.at(-1)![0] - w.length) > eps) {
+    fail('endpoints must span u=0 to u=length (1 mm tolerance)');
+  }
+  points[0][0] = 0;
+  points.at(-1)![0] = w.length;
+  if (points.some((p, i) => i > 0 && p[0] <= points[i - 1][0])) fail('u coordinates must strictly increase');
+  const at = (u: number) => {
+    const right = points.findIndex((p, i) => i > 0 && p[0] >= u);
+    const a = points[right - 1], b = points[right];
+    return a[1] + (b[1] - a[1]) * (u - a[0]) / (b[0] - a[0]);
+  };
+  if (!Array.isArray(w.openings)) fail('openings must be an array');
+  const bounds: [number, number, number, number][] = [];
+  for (const o of w.openings) {
+    if (o.kind !== 'rect') fail('only rectangular openings are supported');
+    if (![o.u0, o.u1, o.v0, o.v1].every(Number.isFinite) || o.u1 <= o.u0 || o.v1 <= o.v0 || o.v0 < 0) {
+      fail('opening coordinates must be finite and ordered, at or above the floor');
+    }
+    const pad = o.casing ? 0.095 : 0;
+    const left = o.u0 - pad, right = o.u1 + pad;
+    const bottom = o.v0 === 0 ? 0 : o.v0 - pad, top = o.v1 + pad;
+    if (left <= eps || right >= w.length - eps || (o.v0 !== 0 && bottom <= eps)) {
+      fail('opening/casing touches a side or the floor; floor openings require v0=0');
+    }
+    const heights = [at(left), at(right), ...points.filter(p => p[0] > left && p[0] < right).map(p => p[1])];
+    if (top >= Math.min(...heights) - eps) fail('opening/casing crosses or touches the top profile');
+    const box: [number, number, number, number] = [left, right, bottom, top];
+    if (bounds.some(b => left <= b[1] + eps && right >= b[0] - eps && bottom <= b[3] + eps && top >= b[2] - eps)) {
+      fail('openings or their casings overlap or touch');
+    }
+    bounds.push(box);
+  }
+  return points;
+}
+
 export function wallShape(w: WallDef, ext = 0.3) {
+  const profile = topProfile(w);
   // run past the corners so slabs overlap
   const [e0, e1] = w.ext ?? [ext, ext];
   const top = w.height ?? WALL_TOP;
@@ -73,8 +134,12 @@ export function wallShape(w: WallDef, ext = 0.3) {
     shape.lineTo(o.u1, 0);
   }
   shape.lineTo(w.length + e1, 0);
-  shape.lineTo(w.length + e1, top);
-  shape.lineTo(-e0, top);
+  if (profile) {
+    for (const [u, v] of profile.slice().reverse()) shape.lineTo(u, v);
+  } else {
+    shape.lineTo(w.length + e1, top);
+    shape.lineTo(-e0, top);
+  }
   shape.closePath();
   for (const o of w.openings) {
     if (notches.includes(o)) continue;
@@ -125,13 +190,14 @@ function paintSlabEnds(geo: THREE.ExtrudeGeometry, w: WallDef) {
   return geo;
 }
 
-export function buildWall(w: WallDef, m = materials(), ext = 0.3) {
+export function buildWall(w: WallDef, m: { wall: THREE.Material; trim: THREE.Material } = materials(), ext = 0.3) {
+  const shape = wallShape(w, ext);
   const group = new THREE.Group();
   group.name = `wall-${w.name}`;
-  const top = w.height ?? WALL_TOP;
+  const top = w.topProfile ? Math.max(...w.topProfile.map(p => p[1])) : w.height ?? WALL_TOP;
   const trim = w.trimMaterial ?? m.trim;
 
-  const geo = paintSlabEnds(new THREE.ExtrudeGeometry(wallShape(w, ext), { depth: w.thickness, bevelEnabled: false, curveSegments: 24 }), w);
+  const geo = paintSlabEnds(new THREE.ExtrudeGeometry(shape, { depth: w.thickness, bevelEnabled: false, curveSegments: 24 }), w);
   geo.translate(0, 0, -w.thickness);
   const slab = mesh(geo, [w.material ?? m.wall, trim]);
   slab.applyMatrix4(wallMatrix(w));
