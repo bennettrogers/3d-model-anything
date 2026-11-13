@@ -16,10 +16,7 @@ on, and the mistakes that cost time the first time around. Read the section you 
 
 ## 1. Room coordinates
 
-Floor at y = 0, room centered on x/z, meters, +y up; −z is whatever wall you call "north".
-The scan is moved into this frame with `SCAN_OFFSET` in `dimensions.ts` (negated center and
-floor height from `measure_scan.mjs`). If the wall azimuth isn't ~0°, rotate the scan by the
-negative angle (`rotY`) so walls run along the X and Z axes; everything downstream assumes that.
+Floor at y = 0, room centered on x/z, meters, +y up; −z is whatever wall you call "north". For GLB reconstruction, `SCAN_OFFSET` in `dimensions.ts` is the negated center and floor height from `measure_scan.mjs`; bundle conversion records `worldToRoom`. A dominant-heading rotation is convenient, but retain genuine angled walls and footprint jogs. Each wall's own `u`/`n` basis handles its direction; do not force an irregular footprint into a rectangle.
 
 ## 2. Walls as data
 
@@ -42,12 +39,35 @@ Measure in world coordinates from the elevations, then convert to u with this ta
   arc starts) become holes.
 - `casing: true` adds door casing and a baseboard gap automatically.
 
-The slab is an `ExtrudeGeometry` with material array `[wall, trim]`. Group 1 (sides) covers the
-jambs/reveals, so openings get trim-colored returns for free. Extend the slab 0.3 m past both ends
-so corners overlap.
+The slab is an `ExtrudeGeometry` with material array `[wall, trim]`. Opening reveals use trim; exposed vertical slab ends use wall paint. Rectangular walls omit `topProfile`, use `height` (default 3.24 m), and extend 0.3 m past both ends by default so corners overlap. Set per-end `ext` where overlap would protrude into the room. Rectangles retain optional crown, panels and arch openings.
 
-Crown and baseboard are straight runs per wall that overlap in the corners. Two inside-corner
-extrusions that cross read as a proper miter, and it keeps each wall's trim in that wall's group.
+Crown and baseboard are straight runs per wall that overlap in the corners. Two inside-corner extrusions that cross read as a proper miter, and it keeps each wall's trim in that wall's group.
+
+### Sloping wall tops
+
+Author `topProfile` as at least two `[u, v]` top points in meters, ordered strictly left to right from `u=0` to `u=length`. Heights must be finite and positive; elevations are relative to the room floor, not relative to the lowest captured vertex. Endpoints within 1 mm are normalized on a copy. The builder supplies a flat floor edge and vertical ends, so this supports gables, asymmetric slopes and interior dips, not arbitrary source polygons. The captured `outline` is separate evidence: preserve it unchanged and document any choice to idealize a raised or uneven source bottom to the room floor.
+
+```ts
+import * as THREE from 'three';
+import { buildWall, type WallDef } from '../../packages/room-runtime/walls'; // from demos/my-room/shell.ts
+
+// Fictional geometry; use measured evidence for an actual room.
+const gable: WallDef = {
+  name: 'gable', origin: new THREE.Vector3(0, 0, 0),
+  u: new THREE.Vector3(1, 0, 0), n: new THREE.Vector3(0, 0, 1),
+  length: 6, thickness: 0.2,
+  topProfile: [[0, 2], [3, 4], [6, 2]],
+  crown: false, ext: [0, 0], panels: [],
+  openings: [{ kind: 'rect', u0: 0.8, u1: 1.7, v0: 0, v1: 1.7, casing: true }],
+};
+const wallGroup = buildWall(gable);
+```
+
+Profile mode forbids `height` and requires explicit `crown: false`, `ext: [0, 0]`, empty `panels`, and rectangular openings. Door bottoms must be exactly `v0=0`; windows and their casings must remain above the floor. Opening/casing bounds must stay more than 1 mm inside the sides and below the entire top chain, including interior low points, and must not touch or overlap other openings/casings. Casing adds a 0.095 m margin. Invalid profiles throw an error naming the wall before extrusion; fix the authored definition or use a separate custom surface for unsupported geometry. Do not disable validation or add an implicit conversion from captured `outline`.
+
+### Pitched ceilings and skylight wells
+
+Wall profiles describe vertical faces only. Build pitched roof planes, ridge/eave joins, the nook transition, skylight aperture, well/reveals and glazing as explicit editable Three.js surfaces, using photos and mesh/depth to resolve their shape. Register roof and well surfaces in `BuiltRoom.ceiling` so the existing ceiling cutaway controls them. Set `BuiltRoom.wallTop` to the actual maximum modeled elevation across walls and ceiling surfaces, including the roof peak; a bounding-box wall height or the default rectangle height is not sufficient. Review an overall view, a ridge/eave view and nook views against matched photos or scan sections before the furniture pass.
 
 ## 3. Profile sweeps
 

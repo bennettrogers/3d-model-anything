@@ -44,6 +44,8 @@ back to room space. The current viewer displays individual rooms; this importer 
 combined-house viewer, merge meshes, align unknown scans, deduplicate shared walls or combine old
 photos across sessions. History is kept in the original export; only active scans are exported.
 
+The app's **Continue scanning from this room** action relocalizes to that saved location before another scan. Room scan versions remain individually selectable; room sharing exports the active version, and the importer follows `active`. Continuing or rescanning does not automatically fuse exported versions, their photos or separately converted models. Preserve exports, choose the version intentionally, and align/compare separate evidence before manually using it to refine a model. Request new photos or measurements only for a named gap in the existing evidence; capture continuation is not a substitute for modeling a ceiling RoomPlan omitted.
+
 ## Current session contents
 
 ```text
@@ -106,10 +108,7 @@ objects openings rooms sections version walls windows`; each element has `identi
 `category` (single-key object, e.g. `{"wall": {}}`, `{"door": {"isOpen": …}}`), `confidence`
 (`{"high": {}}`), `dimensions` [w, h, d], `transform` (16 floats, **column-major**, translation
 = last column), `parentIdentifier`, `completedEdges`, `polygonCorners`, `curve`, `story`.
-Beautified walls come back with empty `completedEdges`/`polygonCorners`. Auto photos are
-1920×1440 video frames; manual shutter photos try ARKit's high-res still first (size varies). RoomPlan reports a
-single flat height per wall (which can miss local ceiling variations), so
-take ceiling shape from photos/mesh.
+Beautified walls can come back with empty `completedEdges`/`polygonCorners`; inspect the actual export. Auto photos are 1920×1440 video frames; manual shutter photos try ARKit's high-res still first (size varies). Wall `dimensions` gives a bounding box; a populated `polygonCorners` can retain a shaped boundary. Neither supplies complete cathedral roof or skylight-well geometry, so resolve those surfaces from photos/mesh.
 
 If in doubt, inspect before assuming field names:
 
@@ -136,7 +135,7 @@ For each wall: local x̂ = first column (along the wall), ŷ = up, ẑ = third c
 1. `center` = translation, `w, h` = dimensions[0..1].
 2. Point `n` into the room: flip ẑ if it points away from the room's centroid (the average of the
    wall centers for that room). If you flip n, also flip x̂ so `u × up = n` still holds.
-3. `origin = center − u·w/2 − up·(center.y − floorY)`; `length = w`; wall top = `floorY + h`.
+3. `origin = center − u·w/2 − up·(center.y − floorY)`; `length = w`; `height = h` is the source box's height span, not necessarily its floor-relative top elevation. Project the source corners in the final inward-facing basis as described below.
 4. Doors/windows/openings with `parentIdentifier` = that wall: take their center relative to the
    wall origin → `u = dot(c − origin, u)`, `v = c.y − floorY`. Span `u ± width/2`,
    `v ± height/2`. Doors and openings whose bottom is within ~5 cm of the floor become `v0 = 0`
@@ -147,8 +146,13 @@ For each wall: local x̂ = first column (along the wall), ŷ = up, ẑ = third c
 6. Rotate the whole house so the dominant wall direction lines up with X/Z (same azimuth trick as
    `measure_scan.mjs`, on wall normals), then translate so the floor is y = 0.
 
-RoomPlan assumes flat ceilings and ignores trim. Get the ceiling from the available mesh/depth
-(height histogram, same as the GLB workflow), and moldings from photos.
+### Converted wall outline contract
+
+Every wall newly emitted by `bundle_to_room.py` has required `outline: [[u, v], ...]` in room-local meters. `u` is measured from `origin` along the final inward-facing wall's `u` axis; `v` is the vertex's room elevation above floor zero. Nonempty `polygonCorners` are transformed through the surface transform and `worldToRoom` before projection. Absent/empty source corners produce the source rectangle, including its actual vertical offset. This is source preservation, not a fallback for older converted files: regenerate those files when outlines are needed.
+
+The polygon has counterclockwise winding, a lexicographically smallest first vertex, no repeated closing vertex, and coordinates rounded to four decimals. Validation rejects nonfinite coordinates/dimensions, fewer than three distinct corners, repeated or degenerate edges, zero area, self-intersection and corners more than 1 mm off the wall plane. Errors identify the wall and occur before output is written. Other fields (`length`, `height`, openings, photos and placement transforms) keep their existing meanings.
+
+Retain the full source boundary, including a raised or uneven bottom. It cannot be passed directly to `buildWall`: the shared runtime accepts either an authored rectangle or an authored floor-based `topProfile`, with explicit limits in [modeling.md](modeling.md). Choose and record any floor idealization when authoring that profile; do not overwrite `outline` to make it fit. A wall's source box height does not establish a roof peak. Model pitched ceilings and skylight wells explicitly from photos/mesh, and moldings from photos.
 
 ## Objects → furniture
 

@@ -67,6 +67,8 @@ class ImportTests(unittest.TestCase):
         for actual, expected in zip(point, [15, 3.5, 14]):
             self.assertAlmostEqual(actual, expected, places=5)
         self.assertEqual([p['file'] for p in r['photos']], ['photos/0009.jpg', 'photos/0003.jpg'])
+        self.assertIn('outline', r['walls'][0])
+        self.assertEqual(r['walls'][0]['outline'], [[0, 0], [6, 0], [6, 2], [0, 2]])
         after = {str(p): p.read_bytes() for p in self.root.rglob('*') if p.is_file()}
         self.assertEqual(before, after)
 
